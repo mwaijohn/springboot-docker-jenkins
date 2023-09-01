@@ -1,0 +1,85 @@
+pipeline {
+
+    environment {
+        registryUrl = "http://192.168.222.82:26084"
+        imageTag = "192.168.222.82:26084/springboot-docker-jenkins"
+        dockerImage = ''
+        serverIp = "192.168.222.127"
+        serverUser = "root"
+    }
+
+    agent any
+
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Checkout the code from your GitHub repository
+                git 'https://github.com/mwaijohn/springboot-docker-jenkins'
+            }
+        }
+
+        stage('Build and Package') {
+            steps {
+                // Build the Spring Boot application using Maven
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Build and Run Docker Container') {
+            steps {
+                // Build a Docker image for the Spring Boot application
+                // sh 'docker build -t ${imageTag}:${BUILD_NUMBER} .'
+
+                // Run the Docker container
+                // sh 'docker run -d -p 9098:9098 ${imageTag}:${BUILD_NUMBER}'
+                 script {
+                    img = imageTag + ":${env.BUILD_ID}"
+                    println ("${img}")
+                    dockerImage = docker.build("${img}")
+                }
+            }
+        }
+
+        stage('Push To Registry') {
+            steps {
+                script {
+                    docker.withRegistry("${registryUrl}") {
+                        dockerImage.push()
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Server Server') {
+                steps {
+                    script {
+                        def stopcontainer = "docker stop ${JOB_NAME}"
+                        def delcontName = "docker rm ${JOB_NAME}"
+                        def delimages = 'docker image prune -a --force'
+                        def drun = "docker run -d --name ${JOB_NAME} -p 9098:9098 ${img}"
+                        println "${drun}"
+                        sshagent(['kubernetes-master']) {
+                            sh returnStatus: true, script: "ssh -o StrictHostKeyChecking=no ${serverUser}@${serverIp} ${stopcontainer} "
+                            sh returnStatus: true, script: "ssh -o StrictHostKeyChecking=no ${serverUser}@${serverIp} ${delcontName}"
+                            sh returnStatus: true, script: "ssh -o StrictHostKeyChecking=no ${serverUser}@${serverIp} ${delimages}"
+
+                        // some block
+                            sh "ssh -o StrictHostKeyChecking=no ${serverUser}@${serverIp} ${drun}"
+                        }
+                }
+            }
+        }
+    }
+
+    // post {
+    //     always {
+    //         // Cleanup: stop and remove the Docker container
+    //         sh 'docker stop $(docker ps -q --filter "ancestor=springboot-docker-jenkins:${BUILD_NUMBER}") || true'
+    //         sh 'docker rm $(docker ps -q -a --filter "ancestor=springboot-docker-jenkins:${BUILD_NUMBER}") || true'
+
+    //         // Cleanup: remove the Docker image built in this build
+    //         sh 'docker rmi -f springboot-docker-jenkins:${BUILD_NUMBER}'
+    //     }
+    // }
+}
